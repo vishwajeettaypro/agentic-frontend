@@ -7,7 +7,7 @@ const LoadingSpinner = ({ size = "md", text = "Loading..." }) => {
       className="d-flex flex-column justify-content-center align-items-center py-4"
       style={{ minHeight: "120px" }}
     >
-      <CSpinner color="primary" size={size} />
+      <CSpinner color="primary" size={"sm"} />
       {text && (
         <div className="mt-2 text-muted" style={{ fontSize: "14px" }}>
           {text}

@@ -5,6 +5,7 @@ import {
 } from '@coreui/react';
 import { getEmailHistory, deleteEmailRecord } from '../services/emailService';
 import { useApp } from '../context/AppContext';
+import MailboxSelector from '../components/MailboxSelector';
 import toast, { Toaster } from 'react-hot-toast';
 
 export default function HistoryPage() {
@@ -55,10 +56,11 @@ export default function HistoryPage() {
   return (
     <>
       <Toaster position="top-right" />
-      <div className="d-flex align-items-center justify-content-between mb-4">
+      <div className="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
         <div>
           <h4 className="fw-700 mb-1" style={{ color: '#1a1f36' }}>Email History</h4>
           <p className="text-muted mb-0" style={{ fontSize: '0.88rem' }}>All AI-processed emails for your account</p>
+          <MailboxSelector className="mt-2" showLabel={false} />
         </div>
         <CButton className="btn-ai" onClick={fetchHistory} disabled={loading || !userEmail}>
           {loading ? <CSpinner size="sm" /> : '🔄 Refresh'}
@@ -66,7 +68,7 @@ export default function HistoryPage() {
       </div>
 
       {!userEmail ? (
-        <div className="alert alert-warning" style={{ borderRadius: 10 }}>⚠️ Set your email in Settings first.</div>
+        <div className="alert alert-warning" style={{ borderRadius: 10 }}>⚠️ Connect a mailbox in Settings first.</div>
       ) : (
         <CCard>
           <CCardHeader className="d-flex align-items-center gap-3">
