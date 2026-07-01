@@ -12,12 +12,19 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
             className="auth-brand-panel d-none d-lg-flex flex-column justify-content-center p-5"
           >
             <div className="auth-brand-content">
-              <div className="auth-logo mb-4">Agentic AI</div>
+              <div className="auth-logo mb-4">
+                <img
+                  src="/logo.png"
+                  alt="Taypro AI"
+                  style={{ height: 32, objectFit: 'contain' }}
+                />
+              </div>
               <h1 className="auth-headline mb-3">
-                Your intelligent assistant for email, calendar, and more.
+                AI-powered email and calendar for modern teams.
               </h1>
               <p className="auth-tagline mb-0">
-                Sign in to manage conversations, automate replies, and stay on top of your schedule.
+                Automate replies, manage your inbox, and stay on schedule — all
+                from one workspace.
               </p>
             </div>
           </CCol>
@@ -28,8 +35,12 @@ export default function AuthLayout({ title, subtitle, children, footer }) {
           >
             <div className="auth-form-wrapper w-100">
               <div className="d-lg-none text-center mb-4">
-                <Link to="/login" className="auth-logo-mobile">
-                  Agentic AI
+                <Link to="/login" className="auth-logo-mobile d-inline-block">
+                  <img
+                    src="/logo.png"
+                    alt="Taypro AI"
+                    style={{ height: 28, objectFit: 'contain' }}
+                  />
                 </Link>
               </div>
 

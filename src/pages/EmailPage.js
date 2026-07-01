@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   CRow,
   CCol,
@@ -16,9 +16,11 @@ import {
   getEmails,
   generateReply,
   createAndSendEmail,
+  downloadEmailAttachment,
+  getUserPreferences,
 } from "../services/emailService";
 import { useApp } from "../context/AppContext";
-import MailboxSelector from "../components/MailboxSelector";
+import PageHeader from "../components/PageHeader";
 import { Toaster } from "react-hot-toast";
 import toast from "react-hot-toast";
 
@@ -66,6 +68,21 @@ export default function EmailPage() {
   const [generating, setGenerating] = useState(false);
   const [sending, setSending] = useState(false);
   const [autoReply, setAutoReply] = useState(true);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState(null);
+
+  useEffect(() => {
+    if (!userEmail) return;
+
+    getUserPreferences(userEmail)
+      .then((data) => {
+        const autoSend =
+          data?.user?.autoSend ?? data?.user?.emailSettings?.autoSend;
+        if (autoSend !== undefined) {
+          setAutoReply(Boolean(autoSend));
+        }
+      })
+      .catch(() => {});
+  }, [userEmail]);
 
   const labeledCount = useMemo(
     () => emails.filter((e) => e.labeled).length,
@@ -114,6 +131,9 @@ export default function EmailPage() {
     try {
       const data = await generateReply(userEmail, selected.id);
       setReplyText(data.generatedReply || "");
+      if (data.autoReply !== undefined) {
+        setAutoReply(Boolean(data.autoReply));
+      }
       toast.success("AI reply generated!");
     } catch (err) {
       toast.error(err.message);
@@ -149,40 +169,80 @@ export default function EmailPage() {
     return d.toLocaleDateString([], { month: "short", day: "numeric" });
   };
 
-  const formatPreview = (text) =>
-    (text || "").replace(/\r\n/g, " ").replace(/\s+/g, " ").trim();
+  const formatPreview = (email) => {
+    const text =
+      email?.bodyText ||
+      email?.body ||
+      email?.bodyPreview ||
+      (typeof email === "string" ? email : "");
+    return String(text).replace(/\s+/g, " ").trim().slice(0, 160);
+  };
+
+  const getEmailBodyDisplay = (email) => {
+    if (!email) return { contentType: "text", content: "" };
+
+    if (email.bodyContentType === "html" && email.body) {
+      return { contentType: "html", content: email.body };
+    }
+
+    return {
+      contentType: "text",
+      content: email.bodyText || email.body || email.bodyPreview || "",
+    };
+  };
+
+  const formatFileSize = (bytes = 0) => {
+    const size = Number(bytes) || 0;
+    if (size < 1024) return `${size} B`;
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const handleDownloadAttachment = async (attachment) => {
+    if (!selected?.id || !userEmail || !attachment?.id) return;
+
+    setDownloadingAttachmentId(attachment.id);
+    try {
+      await downloadEmailAttachment(
+        userEmail,
+        selected.id,
+        attachment.id,
+        attachment.name,
+        attachment.mimeType,
+      );
+      toast.success(`Downloaded ${attachment.name}`);
+    } catch (err) {
+      toast.error(err.message || "Failed to download attachment");
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  };
 
   const filterOptions = ["All", ...availableLabels];
 
   return (
     <>
       <Toaster position="top-right" />
-      <div className="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-3">
-        <div>
-          <h4 className="fw-700 mb-1" style={{ color: "#1a1f36" }}>
-            Email
-          </h4>
-          <p className="text-muted mb-0" style={{ fontSize: "0.88rem" }}>
-            Fetch inbox, auto-label with AI, generate replies and send
-          </p>
-        </div>
-        <div className="d-flex align-items-end gap-3 flex-wrap">
-          <MailboxSelector />
+      <PageHeader
+        title="Inbox"
+        subtitle="Email Agent — fetch inbox, auto-label with AI, generate replies and send"
+        actions={
           <CButton
-            className="btn-ai"
+            className="btn btn-primary"
+            size="sm"
             onClick={handleFetchEmails}
             disabled={loading || !userEmail}
           >
             {loading ? (
               <>
-                <CSpinner size="sm" className="me-2" /> Fetching…
+                <CSpinner size="sm" className="me-2 text-white" /> Fetching…
               </>
             ) : (
               "📥 Fetch Inbox"
             )}
           </CButton>
-        </div>
-      </div>
+        }
+      />
 
       {emails.length > 0 && (
         <div className="d-flex flex-wrap align-items-center gap-3 mb-3">
@@ -263,19 +323,28 @@ export default function EmailPage() {
                       </div>
                       <CategoryBadge category={email.category} />
                     </div>
-                    <div className="email-preview">
-                      {formatPreview(email.bodyPreview)}
-                    </div>
+                    <div className="email-preview">{formatPreview(email)}</div>
+                    {email.hasAttachments && (
+                      <div
+                        className="text-muted mt-1"
+                        style={{ fontSize: "0.72rem" }}
+                      >
+                        📎{" "}
+                        {email.attachments?.length
+                          ? `${email.attachments.length} attachment(s)`
+                          : "Has attachments"}
+                      </div>
+                    )}
                     <div className="d-flex align-items-center gap-2 mt-1">
-                      {email.labeled ? (
+                      {/* {email.labeled ? (
                         <span className="email-label-status success">
-                          ✓ Labeled in Outlook
+                          ✓ Label
                         </span>
                       ) : (
                         <span className="email-label-status warning">
                           ⚠ Label pending
                         </span>
-                      )}
+                      )} */}
                     </div>
                   </div>
                 ))
@@ -349,20 +418,96 @@ export default function EmailPage() {
                   )}
                 </CCardHeader>
                 <CCardBody style={{ overflowY: "auto", flex: 1 }}>
-                  <div
-                    className="mb-3 p-3"
-                    style={{
-                      background: "#fafafa",
-                      borderRadius: 8,
-                      border: "1px solid #e9ecef",
-                      fontSize: "0.85rem",
-                      color: "#4a5568",
-                      whiteSpace: "pre-wrap",
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    {formatPreview(selected.bodyPreview)}
-                  </div>
+                  {(() => {
+                    const body = getEmailBodyDisplay(selected);
+                    return body.contentType === "html" ? (
+                      <div
+                        className="mb-3 p-3 email-body-html"
+                        style={{
+                          background: "#fff",
+                          borderRadius: 8,
+                          border: "1px solid #e9ecef",
+                          fontSize: "0.85rem",
+                          color: "#1a1f36",
+                          lineHeight: 1.6,
+                          overflowX: "auto",
+                        }}
+                        dangerouslySetInnerHTML={{ __html: body.content }}
+                      />
+                    ) : (
+                      <div
+                        className="mb-3 p-3"
+                        style={{
+                          background: "#fafafa",
+                          borderRadius: 8,
+                          border: "1px solid #e9ecef",
+                          fontSize: "0.85rem",
+                          color: "#4a5568",
+                          whiteSpace: "pre-wrap",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {body.content}
+                      </div>
+                    );
+                  })()}
+
+                  {selected.attachments?.length > 0 && (
+                    <div className="mb-3">
+                      <div
+                        className="text-muted mb-2"
+                        style={{ fontSize: "0.78rem", fontWeight: 600 }}
+                      >
+                        Attachments ({selected.attachments.length})
+                      </div>
+                      <div className="d-flex flex-column gap-2">
+                        {selected.attachments.map((attachment) => (
+                          <div
+                            key={attachment.id}
+                            className="d-flex align-items-center justify-content-between gap-2 p-2"
+                            style={{
+                              border: "1px solid #e9ecef",
+                              borderRadius: 8,
+                              background: "#fafafa",
+                            }}
+                          >
+                            <div style={{ minWidth: 0 }}>
+                              <div
+                                className="fw-600 text-truncate"
+                                style={{ fontSize: "0.84rem" }}
+                                title={attachment.name}
+                              >
+                                📎 {attachment.name}
+                              </div>
+                              <div
+                                className="text-muted"
+                                style={{ fontSize: "0.74rem" }}
+                              >
+                                {formatFileSize(attachment.size)}
+                                {attachment.isInline ? " · inline" : ""}
+                              </div>
+                            </div>
+                            <CButton
+                              size="sm"
+                              color="light"
+                              disabled={
+                                downloadingAttachmentId === attachment.id
+                              }
+                              onClick={() =>
+                                handleDownloadAttachment(attachment)
+                              }
+                            >
+                              {downloadingAttachmentId === attachment.id ? (
+                                <CSpinner size="sm" />
+                              ) : (
+                                "Download"
+                              )}
+                            </CButton>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="d-flex align-items-center gap-2 mb-3">
                     <CButton

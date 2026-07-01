@@ -1,39 +1,26 @@
 import React, { useState } from "react";
-import { Outlet, NavLink, useNavigate } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import {
-  CContainer,
-  CSidebar,
-  CSidebarBrand,
-  CSidebarNav,
-  CNavItem,
-  CNavLink,
-  CHeader,
-  CHeaderNav,
-  CHeaderToggler,
   CDropdown,
   CDropdownToggle,
   CDropdownMenu,
   CDropdownItem,
-  CBadge,
 } from "@coreui/react";
 import CIcon from "@coreui/icons-react";
 import {
-  cilSpeedometer,
-  cilEnvelopeClosed,
-  cilCalendar,
-  cilHistory,
+  cilApps,
   cilSettings,
   cilMenu,
   cilUser,
   cilBell,
+  cilAccountLogout,
+  cilChevronLeft,
 } from "@coreui/icons";
 import { useApp } from "../context/AppContext";
+import { AGENTS } from "../config/agents";
 
-const navItems = [
-  { to: "/dashboard", icon: cilSpeedometer, label: "Dashboard" },
-  { to: "/email", icon: cilEnvelopeClosed, label: "Email" },
-  { to: "/calendar", icon: cilCalendar, label: "Calendar" },
-  { to: "/history", icon: cilHistory, label: "History" },
+const platformNav = [
+  { to: "/agents", icon: cilApps, label: "All Agents", end: true },
   { to: "/settings", icon: cilSettings, label: "Settings" },
 ];
 
@@ -41,150 +28,219 @@ export default function DefaultLayout() {
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const { user, userEmail, authEmail, connectedMailboxes, logout } = useApp();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
 
   const displayEmail = userEmail || authEmail || user?.email || "";
+  const displayName =
+    user?.name ||
+    user?.displayName ||
+    displayEmail.split("@")[0] ||
+    "Account";
+
+  const activeAgent = AGENTS.find((agent) =>
+    pathname.toLowerCase().startsWith(agent.basePath.toLowerCase()),
+  );
+
+  const renderNavLink = ({ to, icon, label, end = false, nested = false }) => (
+    <NavLink
+      key={to}
+      to={to}
+      end={end}
+      className={({ isActive }) =>
+        [
+          "saas-nav-link",
+          nested ? "saas-nav-link--nested" : "",
+          isActive ? "saas-nav-link--active" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+      }
+    >
+      {icon ? (
+        <span className="saas-nav-icon-wrap">
+          <CIcon icon={icon} className="saas-nav-icon" />
+        </span>
+      ) : null}
+      <span className="saas-nav-label">{label}</span>
+    </NavLink>
+  );
 
   return (
-    <div className="d-flex" style={{ minHeight: "100vh" }}>
-      {/* Sidebar */}
-      <CSidebar
-        visible={sidebarVisible}
-        onVisibleChange={setSidebarVisible}
-        style={{
-          position: "fixed",
-          top: 0,
-          bottom: 0,
-          left: 0,
-          zIndex: 1030,
-          width: 240,
-        }}
-      >
-        <CSidebarBrand className="py-3">
-          <div className="sidebar-brand-name d-flex align-items-center text-white d-flex justify-content-center">
-            <span>Agentic AI</span>
-          </div>
-        </CSidebarBrand>
+    <div
+      className={`saas-app${sidebarVisible ? "" : " saas-app--sidebar-collapsed"}`}
+    >
+      {sidebarVisible ? (
+        <button
+          type="button"
+          className="saas-sidebar-backdrop d-lg-none"
+          aria-label="Close navigation"
+          onClick={() => setSidebarVisible(false)}
+        />
+      ) : null}
 
-        <CSidebarNav>
-          {navItems.map(({ to, icon, label }) => (
-            <CNavItem key={to}>
-              <NavLink
-                to={to}
-                className={({ isActive }) =>
-                  `nav-link${isActive ? " active" : ""}`
-                }
-              >
-                <CIcon icon={icon} className="nav-icon" />
-                {label}
-              </NavLink>
-            </CNavItem>
-          ))}
-        </CSidebarNav>
+      <aside className="saas-sidebar">
+        <div className="saas-sidebar-glow" aria-hidden="true" />
 
-        {/* User section at bottom */}
-        {displayEmail && (
-          <div
-            className="mt-auto p-3"
-            style={{ borderTop: "1px solid rgba(255,255,255,0.12)" }}
-          >
-            <div className="d-flex align-items-center gap-2">
-              <div
-                style={{
-                  width: 32,
-                  height: 32,
-                  borderRadius: "50%",
-                  background: "rgba(255,255,255,0.2)",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontSize: "0.8rem",
-                  fontWeight: 700,
-                  color: "#fff",
-                }}
-              >
-                {displayEmail[0]?.toUpperCase()}
-              </div>
-              <div style={{ overflow: "hidden" }}>
-                <div
-                  style={{
-                    fontSize: "0.75rem",
-                    color: "rgba(255,255,255,0.85)",
-                    fontWeight: 600,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {displayEmail}
-                </div>
-                {connectedMailboxes.length > 1 && (
-                  <div style={{ fontSize: "0.68rem", color: "rgba(255,255,255,0.6)" }}>
-                    {connectedMailboxes.length} mailboxes
-                  </div>
-                )}
-              </div>
+        <div className="saas-sidebar-brand">
+          <div className="saas-sidebar-brand-main">
+            <img src="/logo.png" alt="Taypro AI" className="saas-sidebar-logo" />
+            <div className="saas-sidebar-brand-text">
+              <span className="saas-sidebar-product">Agent Console</span>
+              <span className="saas-sidebar-tagline">AI Workspace</span>
             </div>
           </div>
-        )}
-      </CSidebar>
-
-      {/* Main content */}
-      <div
-        style={{
-          flex: 1,
-          marginLeft: sidebarVisible ? 240 : 0,
-          transition: "margin-left 0.3s",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
-        {/* Header */}
-        <CHeader
-          className="px-4 py-2 d-flex align-items-center justify-content-between"
-          style={{ position: "sticky", top: 0, zIndex: 1020 }}
-        >
-          <CHeaderToggler
-            onClick={() => setSidebarVisible(!sidebarVisible)}
-            className="me-3"
+          <button
+            type="button"
+            className="saas-sidebar-collapse d-none d-lg-inline-flex"
+            aria-label="Collapse sidebar"
+            onClick={() => setSidebarVisible(false)}
           >
-            <CIcon icon={cilMenu} size="lg" />
-          </CHeaderToggler>
+            <CIcon icon={cilChevronLeft} />
+          </button>
+        </div>
 
-          <div className="ms-auto d-flex align-items-center gap-3">
-            {!displayEmail && (
-              <CBadge
-                color="warning"
-                className="text-dark"
-                style={{ cursor: "pointer" }}
+        <div className="saas-sidebar-nav">
+          <div className="saas-nav-section">
+            <span className="saas-nav-section-label">Platform</span>
+            <div className="saas-nav-group">
+              {platformNav.map((item) => renderNavLink(item))}
+            </div>
+          </div>
+
+          <div className="saas-nav-section saas-nav-section--agents">
+            <span className="saas-nav-section-label">Agents</span>
+            <div className="saas-nav-group">
+              {AGENTS.map((agent) => {
+                const isAgentActive = pathname
+                  .toLowerCase()
+                  .startsWith(agent.basePath.toLowerCase());
+                const hasSubNav = agent.nav?.length > 0;
+
+                return (
+                  <div
+                    key={agent.id}
+                    className={`saas-nav-agent${isAgentActive ? " saas-nav-agent--open" : ""}`}
+                  >
+                    <NavLink
+                      to={agent.basePath}
+                      className={({ isActive }) =>
+                        [
+                          "saas-nav-link",
+                          "saas-nav-link--agent",
+                          agent.comingSoon ? "saas-nav-link--muted" : "",
+                          isActive && !hasSubNav ? "saas-nav-link--active" : "",
+                          isAgentActive ? "saas-nav-link--agent-active" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")
+                      }
+                    >
+                      <span
+                        className="saas-nav-agent-badge"
+                        style={{ "--agent-color": agent.color }}
+                        aria-hidden="true"
+                      >
+                        {agent.icon}
+                      </span>
+                      <span className="saas-nav-label">
+                        <span className="saas-nav-agent-name">{agent.shortName}</span>
+                        {agent.comingSoon ? (
+                          <span className="saas-nav-soon">Soon</span>
+                        ) : null}
+                      </span>
+                    </NavLink>
+
+                    {hasSubNav && isAgentActive ? (
+                      <div className="saas-nav-sub">
+                        {agent.nav.map((item) =>
+                          renderNavLink({ ...item, nested: true }),
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {displayEmail ? (
+          <div className="saas-sidebar-footer">
+            <button
+              type="button"
+              className="saas-sidebar-user"
+              onClick={() => navigate("/settings")}
+            >
+              <div className="saas-sidebar-user-avatar" aria-hidden="true">
+                {displayEmail[0]?.toUpperCase()}
+                <span className="saas-sidebar-user-status" />
+              </div>
+              <div className="saas-sidebar-user-meta">
+                <span className="saas-sidebar-user-name">{displayName}</span>
+                <span className="saas-sidebar-user-email">{displayEmail}</span>
+              </div>
+            </button>
+            {activeAgent ? (
+              <span
+                className="saas-sidebar-agent-pill"
+                style={{ "--agent-color": activeAgent.color }}
+              >
+                {activeAgent.shortName}
+              </span>
+            ) : null}
+          </div>
+        ) : null}
+      </aside>
+
+      <div className="saas-main">
+        <header className="saas-header">
+          <div className="saas-header-start">
+            <button
+              type="button"
+              className="saas-header-toggle"
+              aria-label={sidebarVisible ? "Hide sidebar" : "Show sidebar"}
+              onClick={() => setSidebarVisible(!sidebarVisible)}
+            >
+              <CIcon icon={cilMenu} />
+            </button>
+            {activeAgent ? (
+              <div className="saas-header-context">
+                <span
+                  className="saas-header-context-dot"
+                  style={{ background: activeAgent.color }}
+                />
+                <span className="saas-header-context-label">
+                  {activeAgent.name}
+                </span>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="saas-header-end">
+            {!displayEmail ? (
+              <button
+                type="button"
+                className="saas-header-pill saas-header-pill--warning"
                 onClick={() => navigate("/settings")}
               >
-                ⚠ Connect mailbox in Settings
-              </CBadge>
-            )}
-            <CIcon
-              icon={cilBell}
-              style={{ color: "#6c757d", cursor: "pointer" }}
-            />
-            <CDropdown>
+                Connect mailbox
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              className="saas-header-icon-btn"
+              aria-label="Notifications"
+            >
+              <CIcon icon={cilBell} />
+            </button>
+
+            <CDropdown alignment="end">
               <CDropdownToggle
                 caret={false}
-                className="p-0 border-0 bg-transparent"
+                className="saas-header-profile-toggle"
               >
-                <div
-                  style={{
-                    width: 34,
-                    height: 34,
-                    borderRadius: "50%",
-                    background: "linear-gradient(135deg, #321fdb, #5b5ea6)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "#fff",
-                    fontWeight: 700,
-                    fontSize: "0.85rem",
-                    cursor: "pointer",
-                  }}
-                >
+                <div className="saas-header-avatar">
                   {displayEmail ? (
                     displayEmail[0]?.toUpperCase()
                   ) : (
@@ -192,9 +248,28 @@ export default function DefaultLayout() {
                   )}
                 </div>
               </CDropdownToggle>
-              <CDropdownMenu>
+              <CDropdownMenu className="saas-dropdown-menu">
+                {displayEmail ? (
+                  <>
+                    <div className="saas-dropdown-header">
+                      <span className="saas-dropdown-name">{displayName}</span>
+                      <span className="saas-dropdown-email">{displayEmail}</span>
+                      {connectedMailboxes.length > 1 ? (
+                        <span className="saas-dropdown-meta">
+                          {connectedMailboxes.length} connected mailboxes
+                        </span>
+                      ) : null}
+                    </div>
+                    <CDropdownItem divider />
+                  </>
+                ) : null}
+                <CDropdownItem onClick={() => navigate("/agents")}>
+                  <CIcon icon={cilApps} className="me-2" />
+                  All Agents
+                </CDropdownItem>
                 <CDropdownItem onClick={() => navigate("/settings")}>
-                  <CIcon icon={cilSettings} className="me-2" /> Settings
+                  <CIcon icon={cilSettings} className="me-2" />
+                  Settings
                 </CDropdownItem>
                 <CDropdownItem
                   onClick={async () => {
@@ -202,17 +277,19 @@ export default function DefaultLayout() {
                     navigate("/login");
                   }}
                 >
+                  <CIcon icon={cilAccountLogout} className="me-2" />
                   Sign out
                 </CDropdownItem>
               </CDropdownMenu>
             </CDropdown>
           </div>
-        </CHeader>
+        </header>
 
-        {/* Page content */}
-        <CContainer fluid className="p-4" style={{ flex: 1 }}>
-          <Outlet />
-        </CContainer>
+        <main className="saas-content">
+          <div className="saas-content-inner">
+            <Outlet />
+          </div>
+        </main>
       </div>
     </div>
   );

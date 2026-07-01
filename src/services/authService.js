@@ -24,3 +24,10 @@ export const signOut = async () => {
   const { data } = await api.post('/auth/signout');
   return data;
 };
+
+export const getGoogleConnectUrl = (displayName = "") =>
+  api
+    .get("/auth/google/connect-url", {
+      params: displayName ? { displayName } : undefined,
+    })
+    .then((r) => r.data);

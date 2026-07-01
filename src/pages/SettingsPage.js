@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import toast, { Toaster } from "react-hot-toast";
 import {
   CRow,
@@ -19,6 +20,19 @@ import {
   CBadge,
   CSpinner,
 } from "@coreui/react";
+import CIcon from "@coreui/icons-react";
+import {
+  cilAppsSettings,
+  cilAt,
+  cilBolt,
+  cilCheckCircle,
+  cilEnvelopeClosed,
+  cilInbox,
+  cilSend,
+  cilSettings,
+  cilSpeech,
+  cilUser,
+} from "@coreui/icons";
 import { useApp } from "../context/AppContext";
 import LoadingSpinner from "../components/LoadingSpinner";
 import {
@@ -28,17 +42,53 @@ import {
   completeMailboxSetup,
   disconnectMailbox,
   saveProfile,
+  enrichProfileFromCompany,
   updateMessaging,
   skipMessaging,
   updateMailboxSettings,
   setPrimaryMailbox,
 } from "../services/userDetailsService";
+import { getGoogleConnectUrl } from "../services/authService";
+import {
+  getMessagingStatus,
+  generateTelegramLinkCode,
+  unlinkTelegram,
+  testTelegramMessage,
+  testWhatsAppMessage,
+} from "../services/messagingService";
 
 const FALLBACK_STEPS = [
-  { id: "email_connection", label: "Mailboxes", icon: "📧" },
-  { id: "profile", label: "Profile", icon: "👤" },
-  { id: "messaging", label: "Messaging", icon: "💬" },
-  { id: "completed", label: "Done", icon: "✓" },
+  { id: "email_connection", label: "Mailboxes", icon: cilEnvelopeClosed },
+  { id: "profile", label: "Profile", icon: cilUser },
+  { id: "messaging", label: "Messaging", icon: cilSpeech },
+  { id: "completed", label: "Done", icon: cilCheckCircle },
+];
+
+const SETTINGS_TABS = [
+  {
+    key: "email",
+    label: "Mailboxes",
+    description: "Connected accounts",
+    icon: cilInbox,
+  },
+  {
+    key: "profile",
+    label: "Profile",
+    description: "Identity and tone",
+    icon: cilUser,
+  },
+  {
+    key: "messaging",
+    label: "Approvals",
+    description: "Telegram and WhatsApp",
+    icon: cilSend,
+  },
+  {
+    key: "ai",
+    label: "AI Preferences",
+    description: "Reply behavior",
+    icon: cilBolt,
+  },
 ];
 
 const parseList = (value) =>
@@ -54,6 +104,7 @@ const emptyProfile = {
   company: "",
   department: "",
   industry: "",
+  companyWebsite: "",
   bio: "",
   writingStyle: "professional",
   preferredLanguage: "en",
@@ -98,6 +149,8 @@ const SettingsPage = () => {
   const [onboarding, setOnboarding] = useState(null);
   const [connectedMailboxes, setConnectedMailboxes] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [gmailConnecting, setGmailConnecting] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [mailboxForm, setMailboxForm] = useState(emptyMailboxForm);
   const [profileForm, setProfileForm] = useState(emptyProfile);
@@ -109,8 +162,36 @@ const SettingsPage = () => {
   });
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [aiPrefsSaving, setAiPrefsSaving] = useState(false);
+  const [enrichingProfile, setEnrichingProfile] = useState(false);
+  const [messagingStatus, setMessagingStatus] = useState(null);
+  const [telegramLinkCode, setTelegramLinkCode] = useState("");
+  const [messagingActionLoading, setMessagingActionLoading] = useState(false);
 
-  const hydrateFromMailbox = useCallback((mailbox) => {
+  const profileCompanyFieldsReady = [
+    profileForm.designation,
+    profileForm.company,
+    profileForm.department,
+    profileForm.industry,
+  ].every((value) => String(value || "").trim());
+
+  const applyMessagingProfile = useCallback((messaging = {}) => {
+    if (!messaging || !Object.keys(messaging).length) return;
+
+    setMessagingForm({
+      telegram: messaging.activeServices?.telegram ?? false,
+      whatsapp: messaging.activeServices?.whatsapp ?? false,
+      preferredApprovalChannel: messaging.preferredApprovalChannel || "telegram",
+      telegramUsername: messaging.serviceContacts?.telegramUsername || "",
+      whatsappNumber: messaging.serviceContacts?.whatsappNumber || "",
+      requireApprovalForEmailSend:
+        messaging.approvalSettings?.requireApprovalForEmailSend ?? true,
+      requireApprovalForEmailDraft:
+        messaging.approvalSettings?.requireApprovalForEmailDraft ?? false,
+    });
+    setTelegramLinkCode(messaging.telegramLinkCode || "");
+  }, []);
+
+  const hydrateFromMailbox = useCallback((mailbox, messaging) => {
     if (!mailbox) return;
 
     setProfileForm({
@@ -118,6 +199,11 @@ const SettingsPage = () => {
       company: mailbox.company || "",
       department: mailbox.department || "",
       industry: mailbox.industry || "",
+      companyWebsite:
+        mailbox.companyWebsite ||
+        (mailbox.mailboxEmail?.includes("@")
+          ? `https://${mailbox.mailboxEmail.split("@")[1]}`
+          : ""),
       bio: mailbox.bio || "",
       writingStyle: mailbox.writingStyle || "professional",
       preferredLanguage: mailbox.preferredLanguage || "en",
@@ -141,12 +227,33 @@ const SettingsPage = () => {
         mailbox.approvalSettings?.requireApprovalForEmailDraft ?? false,
     });
 
+    applyMessagingProfile(messaging);
+
     setAiPrefs({
       writingStyle: mailbox.writingStyle || "professional",
       autoSend: mailbox.emailSettings?.autoSend ?? false,
       customTemplate: mailbox.emailSettings?.customTemplate || "",
     });
-  }, []);
+  }, [applyMessagingProfile]);
+
+  const loadMessagingStatus = useCallback(async () => {
+    if (!userId) return;
+    setMessagingActionLoading(true);
+    try {
+      const res = await getMessagingStatus(userId);
+      setMessagingStatus(res.data || null);
+      if (res.data?.messaging) {
+        applyMessagingProfile(res.data.messaging);
+      }
+      if (res.data?.telegram?.pendingLinkCode) {
+        setTelegramLinkCode(res.data.telegram.pendingLinkCode);
+      }
+    } catch (err) {
+      toast.error(err.message || "Failed to load messaging status");
+    } finally {
+      setMessagingActionLoading(false);
+    }
+  }, [userId, applyMessagingProfile]);
 
   const loadPrimaryMailboxDetails = useCallback(
     async (mailboxEmail) => {
@@ -154,7 +261,7 @@ const SettingsPage = () => {
       setDetailsLoading(true);
       try {
         const res = await getUserDetails(userId, mailboxEmail);
-        hydrateFromMailbox(res.data || res.mailbox);
+        hydrateFromMailbox(res.data || res.mailbox, res.messaging);
       } catch (err) {
         toast.error(err.message || "Failed to load mailbox settings");
       } finally {
@@ -217,8 +324,50 @@ const SettingsPage = () => {
   }, [defaultMailboxEmail, loadPrimaryMailboxDetails]);
 
   useEffect(() => {
+    if (activeTab === "messaging" && userId) {
+      loadMessagingStatus();
+    }
+  }, [activeTab, userId, loadMessagingStatus]);
+
+  useEffect(() => {
     loadSettings();
   }, [loadSettings]);
+
+  useEffect(() => {
+    const gmailConnected = searchParams.get("gmailConnected");
+    const mailbox = searchParams.get("mailbox");
+    const gmailError = searchParams.get("gmailError");
+    const tab = searchParams.get("tab");
+
+    if (tab === "email") {
+      setActiveTab("email");
+    }
+
+    if (gmailConnected === "1") {
+      toast.success(
+        mailbox ? `Gmail connected: ${mailbox}` : "Gmail mailbox connected",
+      );
+      if (userId) {
+        refreshUserDetails(userId);
+        loadSettings();
+      }
+      searchParams.delete("gmailConnected");
+      searchParams.delete("mailbox");
+      searchParams.delete("tab");
+      setSearchParams(searchParams, { replace: true });
+    } else if (gmailError) {
+      toast.error(decodeURIComponent(gmailError));
+      searchParams.delete("gmailError");
+      searchParams.delete("tab");
+      setSearchParams(searchParams, { replace: true });
+    }
+  }, [
+    searchParams,
+    setSearchParams,
+    userId,
+    refreshUserDetails,
+    loadSettings,
+  ]);
 
   const steps = onboarding?.steps?.length
     ? onboarding.steps.map((s) => ({
@@ -230,6 +379,10 @@ const SettingsPage = () => {
     : FALLBACK_STEPS.map((s) => ({ ...s, status: "pending" }));
 
   const handleAddMailbox = async () => {
+    if (mailboxForm.emailProvider === "gmail") {
+      return handleConnectGmail();
+    }
+
     if (!mailboxForm.email.trim()) {
       toast.error("Email address is required");
       return;
@@ -256,6 +409,17 @@ const SettingsPage = () => {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleConnectGmail = async () => {
+    setGmailConnecting(true);
+    try {
+      const res = await getGoogleConnectUrl(mailboxForm.displayName.trim());
+      window.location.href = res.url;
+    } catch (err) {
+      toast.error(err.message || "Failed to start Google sign-in");
+      setGmailConnecting(false);
     }
   };
 
@@ -304,6 +468,52 @@ const SettingsPage = () => {
     }
   };
 
+  const handleEnrichFromCompany = async () => {
+    if (!userId || !defaultMailboxEmail) {
+      toast.error("Set a primary mailbox first");
+      return;
+    }
+    if (!profileCompanyFieldsReady) {
+      toast.error("Fill designation, company, department, and industry first");
+      return;
+    }
+
+    setEnrichingProfile(true);
+    try {
+      const res = await enrichProfileFromCompany({
+        userId,
+        mailboxEmail: defaultMailboxEmail,
+        designation: profileForm.designation,
+        company: profileForm.company,
+        department: profileForm.department,
+        industry: profileForm.industry,
+        companyWebsite: profileForm.companyWebsite,
+        bio: profileForm.bio,
+        keywords: parseList(profileForm.keywords),
+      });
+
+      setProfileForm((form) => ({
+        ...form,
+        bio: res.bio || form.bio,
+        keywords: formatList(res.keywords || parseList(form.keywords)),
+      }));
+
+      toast.success(
+        res.generationSource === "azure"
+          ? "Bio and keywords generated with Azure OpenAI"
+          : res.quotaExceeded
+            ? "Bio and keywords filled from website (AI quota limit reached)"
+            : res.websiteFound
+              ? `Bio and keywords updated from ${res.websiteUsed || "company website"}`
+              : res.message || "Bio and keywords generated from company profile",
+      );
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setEnrichingProfile(false);
+    }
+  };
+
   const handleSaveProfile = async () => {
     if (!defaultMailboxEmail) {
       toast.error("Set a primary mailbox first");
@@ -318,6 +528,7 @@ const SettingsPage = () => {
         company: profileForm.company,
         department: profileForm.department,
         industry: profileForm.industry,
+        companyWebsite: profileForm.companyWebsite,
         bio: profileForm.bio,
         writingStyle: profileForm.writingStyle,
         preferredLanguage: profileForm.preferredLanguage,
@@ -331,12 +542,97 @@ const SettingsPage = () => {
       applyResponse(res);
       await refreshUserDetails(userId);
       await loadPrimaryMailboxDetails(defaultMailboxEmail);
+
+      if (res.companyEnrichment?.enriched) {
+        setProfileForm((form) => ({
+          ...form,
+          bio: res.data?.bio || res.companyEnrichment.bio || form.bio,
+          keywords: formatList(
+            res.data?.keywords || res.companyEnrichment.keywords || [],
+          ),
+        }));
+      }
+
       toast.success(res.message || "Profile saved");
       setActiveTab("messaging");
     } catch (err) {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleGenerateTelegramCode = async () => {
+    if (!userId) return;
+    setMessagingActionLoading(true);
+    try {
+      const res = await generateTelegramLinkCode(userId);
+      setTelegramLinkCode(res.linkCode || "");
+      setMessagingStatus(res.data || messagingStatus);
+      toast.success(res.message || "Link code generated");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMessagingActionLoading(false);
+    }
+  };
+
+  const handleUnlinkTelegram = async () => {
+    if (!userId) return;
+    if (!window.confirm("Unlink Telegram from this account?")) return;
+    setMessagingActionLoading(true);
+    try {
+      const res = await unlinkTelegram(userId);
+      setMessagingStatus(res.data || null);
+      setTelegramLinkCode("");
+      applyMessagingProfile(res.data?.messaging);
+      toast.success(res.message || "Telegram unlinked");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMessagingActionLoading(false);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    if (!userId) return;
+    setMessagingActionLoading(true);
+    try {
+      const res = await testTelegramMessage(userId);
+      toast.success(res.message || "Test sent to Telegram");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMessagingActionLoading(false);
+    }
+  };
+
+  const handleTestWhatsApp = async () => {
+    if (!userId) return;
+    setMessagingActionLoading(true);
+    try {
+      const res = await testWhatsAppMessage(userId);
+      toast.success(res.message || "Test sent to WhatsApp");
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setMessagingActionLoading(false);
+    }
+  };
+
+  const copyTelegramStartCommand = async () => {
+    const command =
+      messagingStatus?.telegram?.startCommand ||
+      (telegramLinkCode ? `/start ${telegramLinkCode}` : "");
+    if (!command) {
+      toast.error("Generate a link code first");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(command);
+      toast.success("Copied to clipboard");
+    } catch {
+      toast.error("Could not copy — copy manually: " + command);
     }
   };
 
@@ -347,6 +643,10 @@ const SettingsPage = () => {
     }
     setSaving(true);
     try {
+      const linkedTelegram = messagingStatus?.telegram?.linked;
+      const linkedChatId = messagingStatus?.telegram?.chatId;
+      const linkedUsername = messagingStatus?.telegram?.username;
+
       const res = await updateMessaging({
         userId,
         mailboxEmail: defaultMailboxEmail,
@@ -356,8 +656,13 @@ const SettingsPage = () => {
         },
         preferredApprovalChannel: messagingForm.preferredApprovalChannel,
         serviceContacts: {
-          telegramUsername: messagingForm.telegramUsername || null,
+          telegramUsername:
+            messagingForm.telegramUsername ||
+            (linkedTelegram && linkedUsername ? linkedUsername : null),
           whatsappNumber: messagingForm.whatsappNumber || null,
+          ...(linkedTelegram && linkedChatId
+            ? { telegramChatId: String(linkedChatId) }
+            : {}),
         },
         approvalSettings: {
           requireApprovalForEmailSend:
@@ -367,8 +672,12 @@ const SettingsPage = () => {
         },
       });
       applyResponse(res);
+      if (res.messaging) {
+        applyMessagingProfile(res.messaging);
+      }
       await refreshUserDetails(userId);
       await loadPrimaryMailboxDetails(defaultMailboxEmail);
+      await loadMessagingStatus();
       toast.success(res.message || "Messaging settings saved");
     } catch (err) {
       toast.error(err.message);
@@ -427,51 +736,70 @@ const SettingsPage = () => {
     <>
       <Toaster position="top-right" />
 
-      <div className="mb-4">
-        <h4 className="fw-700 mb-1 text-dark">Settings</h4>
-        <p className="text-muted mb-0" style={{ fontSize: "0.88rem" }}>
-          Connect mailboxes, complete onboarding, and configure AI preferences
-        </p>
-      </div>
+      <section className="settings-hero mb-4">
+        <div className="settings-hero-copy">
+          <div className="settings-eyebrow">
+            <CIcon icon={cilAppsSettings} />
+            Workspace Settings
+          </div>
+          <h1>Control center for your AI workspace</h1>
+          <p>
+            Connect mailboxes, tune your profile, configure approvals, and
+            control how your AI agent responds.
+          </p>
+        </div>
 
-      <CCard className="mb-4">
-        <CCardBody className="d-flex flex-wrap align-items-center gap-3 py-3">
-          <div
-            className="d-flex align-items-center justify-content-center text-white fw-bold"
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: "50%",
-              background: "linear-gradient(135deg, #321fdb, #5b5ea6)",
-              fontSize: "1.1rem",
-            }}
-          >
+        <div className="settings-account-card">
+          <div className="settings-account-avatar">
             {(user.username || user.email)?.[0]?.toUpperCase()}
           </div>
-          <div className="flex-grow-1">
-            <div className="fw-600" style={{ color: "#1a1f36" }}>
-              {user.username}
-            </div>
-            <div className="text-muted" style={{ fontSize: "0.84rem" }}>
-              {authEmail}
-            </div>
+          <div className="settings-account-copy">
+            <span className="settings-account-name">
+              {user.username || "Workspace Admin"}
+            </span>
+            <span className="settings-account-email">{authEmail}</span>
           </div>
-          <CBadge color="info" className="text-capitalize">
-            {user.role}
-          </CBadge>
-          {onboarding?.connectedMailboxCount > 0 && (
-            <CBadge color="primary">
-              {onboarding.connectedMailboxCount} mailbox(es)
-            </CBadge>
-          )}
-          {defaultMailboxEmail && (
-            <CBadge color="secondary">Primary: {defaultMailboxEmail}</CBadge>
-          )}
-          {onboarding?.isOnboardingComplete && (
-            <CBadge color="success">Setup complete</CBadge>
-          )}
-        </CCardBody>
-      </CCard>
+          <span className="settings-role-pill text-capitalize">
+            {user.role || "user"}
+          </span>
+        </div>
+      </section>
+
+      <div className="settings-insights-grid mb-4">
+        <div className="settings-insight-card">
+          <span className="settings-insight-icon">
+            <CIcon icon={cilEnvelopeClosed} />
+          </span>
+          <div>
+            <div className="settings-insight-value">
+              {onboarding?.connectedMailboxCount || 0}
+            </div>
+            <div className="settings-insight-label">Connected mailboxes</div>
+          </div>
+        </div>
+        <div className="settings-insight-card">
+          <span className="settings-insight-icon">
+            <CIcon icon={cilAt} />
+          </span>
+          <div>
+            <div className="settings-insight-value settings-insight-email">
+              {defaultMailboxEmail || "Not selected"}
+            </div>
+            <div className="settings-insight-label">Primary mailbox</div>
+          </div>
+        </div>
+        <div className="settings-insight-card">
+          <span className="settings-insight-icon">
+            <CIcon icon={cilCheckCircle} />
+          </span>
+          <div>
+            <div className="settings-insight-value">
+              {onboarding?.isOnboardingComplete ? "Complete" : "In progress"}
+            </div>
+            <div className="settings-insight-label">Setup status</div>
+          </div>
+        </div>
+      </div>
 
       <div className="settings-stepper mb-4">
         {steps.map((step) => {
@@ -489,7 +817,7 @@ const SettingsPage = () => {
               title={step.description}
             >
               <div className="settings-step-icon">
-                {isDone ? "✓" : fallback?.icon || "•"}
+                <CIcon icon={isDone ? cilCheckCircle : fallback?.icon || cilSettings} />
               </div>
               <div className="settings-step-label">{step.label}</div>
             </div>
@@ -497,20 +825,20 @@ const SettingsPage = () => {
         })}
       </div>
 
-      <CNav variant="tabs" className="mb-4 settings-tabs">
-        {[
-          { key: "email", label: "Mailboxes" },
-          { key: "profile", label: "Profile" },
-          { key: "messaging", label: "Messaging & Approvals" },
-          { key: "ai", label: "AI Preferences" },
-        ].map((tab) => (
+      <CNav className="mb-4 settings-tabs settings-tabs-premium">
+        {SETTINGS_TABS.map((tab) => (
           <CNavItem key={tab.key}>
             <CNavLink
               active={activeTab === tab.key}
               onClick={() => setActiveTab(tab.key)}
-              style={{ cursor: "pointer" }}
             >
-              {tab.label}
+              <span className="settings-tab-icon">
+                <CIcon icon={tab.icon} />
+              </span>
+              <span className="settings-tab-copy">
+                <span>{tab.label}</span>
+                <small>{tab.description}</small>
+              </span>
             </CNavLink>
           </CNavItem>
         ))}
@@ -525,9 +853,15 @@ const SettingsPage = () => {
           {activeTab === "email" && (
             <>
               <CCol lg={5}>
-                <CCard>
-                  <CCardHeader>
-                    <strong>📬 Connected Mailboxes</strong>
+                <CCard className="settings-panel-card">
+                  <CCardHeader className="settings-panel-header">
+                    <span className="settings-panel-icon">
+                      <CIcon icon={cilEnvelopeClosed} />
+                    </span>
+                    <div>
+                      <strong>Connected Mailboxes</strong>
+                      <small>Accounts available to your AI workspace</small>
+                    </div>
                   </CCardHeader>
                   <CCardBody>
                     {connectedMailboxes.length === 0 ? (
@@ -575,8 +909,9 @@ const SettingsPage = () => {
                                     className="text-muted text-capitalize"
                                     style={{ fontSize: "0.72rem" }}
                                   >
-                                    {mb.emailProvider}
-                                  </div>
+                                  {mb.emailProvider}
+                                  {mb.isOAuthConnected ? " · Google linked" : ""}
+                                </div>
                                 </div>
                                 <div className="d-flex flex-column gap-1 align-items-end">
                                   {!isPrimaryMailbox && (
@@ -655,9 +990,15 @@ const SettingsPage = () => {
               </CCol>
 
               <CCol lg={7}>
-                <CCard>
-                  <CCardHeader>
-                    <strong>➕ Add Mailbox</strong>
+                <CCard className="settings-panel-card">
+                  <CCardHeader className="settings-panel-header">
+                    <span className="settings-panel-icon">
+                      <CIcon icon={cilAt} />
+                    </span>
+                    <div>
+                      <strong>Add Mailbox</strong>
+                      <small>Connect Gmail or Microsoft 365 accounts</small>
+                    </div>
                   </CCardHeader>
                   <CCardBody>
                     <p
@@ -669,22 +1010,6 @@ const SettingsPage = () => {
                       mailbox. It is also the default for Email, Calendar, and
                       History after sign-in.
                     </p>
-
-                    <div className="mb-3">
-                      <CFormLabel className="fw-semibold">
-                        Display Name
-                      </CFormLabel>
-                      <CFormInput
-                        value={mailboxForm.displayName}
-                        onChange={(e) =>
-                          setMailboxForm((f) => ({
-                            ...f,
-                            displayName: e.target.value,
-                          }))
-                        }
-                        placeholder="Work Outlook"
-                      />
-                    </div>
 
                     <div className="mb-3">
                       <CFormLabel className="fw-semibold">Provider</CFormLabel>
@@ -700,6 +1025,58 @@ const SettingsPage = () => {
                         <option value="outlook">Outlook / Microsoft 365</option>
                         <option value="gmail">Gmail</option>
                       </CFormSelect>
+                    </div>
+
+                    {mailboxForm.emailProvider === "gmail" ? (
+                      <>
+                        <CAlert color="info" className="mb-3 py-2" style={{ fontSize: "0.84rem" }}>
+                          Sign in with Google to connect Gmail. Your mailbox and
+                          OAuth tokens are saved automatically in the database.
+                        </CAlert>
+                        <div className="mb-3">
+                          <CFormLabel className="fw-semibold">
+                            Display Name (optional)
+                          </CFormLabel>
+                          <CFormInput
+                            value={mailboxForm.displayName}
+                            onChange={(e) =>
+                              setMailboxForm((f) => ({
+                                ...f,
+                                displayName: e.target.value,
+                              }))
+                            }
+                            placeholder="Personal Gmail"
+                          />
+                        </div>
+                        <CButton
+                          color="danger"
+                          className="text-white"
+                          onClick={handleConnectGmail}
+                          disabled={gmailConnecting || saving}
+                        >
+                          {gmailConnecting ? (
+                            <CSpinner size="sm" />
+                          ) : (
+                            "Connect with Google"
+                          )}
+                        </CButton>
+                      </>
+                    ) : (
+                      <>
+                    <div className="mb-3">
+                      <CFormLabel className="fw-semibold">
+                        Display Name
+                      </CFormLabel>
+                      <CFormInput
+                        value={mailboxForm.displayName}
+                        onChange={(e) =>
+                          setMailboxForm((f) => ({
+                            ...f,
+                            displayName: e.target.value,
+                          }))
+                        }
+                        placeholder="Work Outlook"
+                      />
                     </div>
 
                     <div className="mb-3">
@@ -743,6 +1120,8 @@ const SettingsPage = () => {
                     >
                       {saving ? <CSpinner size="sm" /> : "Add Mailbox"}
                     </CButton>
+                      </>
+                    )}
                   </CCardBody>
                 </CCard>
               </CCol>
@@ -751,9 +1130,15 @@ const SettingsPage = () => {
 
           {activeTab === "profile" && (
             <CCol lg={10}>
-              <CCard>
-                <CCardHeader>
-                  <strong>👤 User Profile</strong>
+              <CCard className="settings-panel-card">
+                <CCardHeader className="settings-panel-header">
+                  <span className="settings-panel-icon">
+                    <CIcon icon={cilUser} />
+                  </span>
+                  <div>
+                    <strong>User Profile</strong>
+                    <small>Company context, signature, and response style</small>
+                  </div>
                 </CCardHeader>
                 <CCardBody>
                   {!onboarding?.mailboxesSetupCompleted && (
@@ -831,6 +1216,46 @@ const SettingsPage = () => {
                           }))
                         }
                       />
+                    </CCol>
+                    <CCol md={12}>
+                      <CFormLabel className="fw-semibold">
+                        Company website
+                      </CFormLabel>
+                      <div className="d-flex flex-wrap gap-2">
+                        <CFormInput
+                          className="flex-grow-1"
+                          value={profileForm.companyWebsite}
+                          onChange={(e) =>
+                            setProfileForm((f) => ({
+                              ...f,
+                              companyWebsite: e.target.value,
+                            }))
+                          }
+                          placeholder="https://company.com or company.com"
+                        />
+                        <CButton
+                          color="light"
+                          className="text-nowrap"
+                          onClick={handleEnrichFromCompany}
+                          disabled={
+                            enrichingProfile ||
+                            saving ||
+                            detailsLoading ||
+                            !profileCompanyFieldsReady
+                          }
+                        >
+                          {enrichingProfile ? (
+                            <CSpinner size="sm" />
+                          ) : (
+                            "✨ Generate bio & keywords"
+                          )}
+                        </CButton>
+                      </div>
+                      <div className="form-text">
+                        After filling designation, company, department, and
+                        industry, we fetch your company website and auto-fill bio
+                        and keywords.
+                      </div>
                     </CCol>
                     <CCol md={12}>
                       <CFormLabel className="fw-semibold">Bio</CFormLabel>
@@ -985,9 +1410,15 @@ const SettingsPage = () => {
 
           {activeTab === "messaging" && (
             <CCol lg={8}>
-              <CCard>
-                <CCardHeader>
-                  <strong>💬 Messaging & Approval Channels</strong>
+              <CCard className="settings-panel-card">
+                <CCardHeader className="settings-panel-header">
+                  <span className="settings-panel-icon">
+                    <CIcon icon={cilSend} />
+                  </span>
+                  <div>
+                    <strong>Messaging & Approval Channels</strong>
+                    <small>Telegram, WhatsApp, and approval rules</small>
+                  </div>
                 </CCardHeader>
                 <CCardBody>
                   {!onboarding?.profileComplete && (
@@ -1013,71 +1444,205 @@ const SettingsPage = () => {
                     </div>
                   ) : (
                   <>
-                  <div className="mb-3">
-                    <CFormCheck
-                      id="telegram"
-                      label="Enable Telegram notifications"
-                      checked={messagingForm.telegram}
-                      onChange={(e) =>
-                        setMessagingForm((f) => ({
-                          ...f,
-                          telegram: e.target.checked,
-                        }))
-                      }
-                    />
-                  </div>
-                  {messagingForm.telegram && (
-                    <div className="mb-3 ms-4">
-                      <CFormLabel className="fw-semibold">
-                        Telegram Username
-                      </CFormLabel>
-                      <CFormInput
-                        value={messagingForm.telegramUsername}
-                        onChange={(e) =>
-                          setMessagingForm((f) => ({
-                            ...f,
-                            telegramUsername: e.target.value,
-                          }))
-                        }
-                        placeholder="@username"
-                      />
-                    </div>
-                  )}
+                  <div className="messaging-service-grid mb-4">
+                    <div className="messaging-service-card">
+                      <div className="messaging-service-card-head">
+                        <span className="messaging-service-icon">
+                          <CIcon icon={cilSend} />
+                        </span>
+                        <div>
+                          <strong>Telegram</strong>
+                          <div className="text-muted" style={{ fontSize: "0.8rem" }}>
+                            {messagingStatus?.telegram?.botUsername || "@agentic_email_bot"}
+                            {messagingStatus?.telegram?.botConfigured ? (
+                              <CBadge color="success" className="ms-2">Bot online</CBadge>
+                            ) : (
+                              <CBadge color="secondary" className="ms-2">Bot not configured</CBadge>
+                            )}
+                          </div>
+                        </div>
+                        <CBadge color={messagingStatus?.telegram?.linked ? "success" : "warning"}>
+                          {messagingStatus?.telegram?.linked ? "Linked" : "Not linked"}
+                        </CBadge>
+                      </div>
 
-                  <div className="mb-3">
-                    <CFormCheck
-                      id="whatsapp"
-                      label="Enable WhatsApp notifications"
-                      checked={messagingForm.whatsapp}
-                      onChange={(e) =>
-                        setMessagingForm((f) => ({
-                          ...f,
-                          whatsapp: e.target.checked,
-                        }))
-                      }
-                    />
-                  </div>
-                  {messagingForm.whatsapp && (
-                    <div className="mb-3 ms-4">
-                      <CFormLabel className="fw-semibold">
-                        WhatsApp Number
-                      </CFormLabel>
-                      <CFormInput
-                        value={messagingForm.whatsappNumber}
+                      <CFormCheck
+                        id="telegram"
+                        className="mb-3"
+                        label="Enable Telegram notifications & commands"
+                        checked={messagingForm.telegram}
                         onChange={(e) =>
                           setMessagingForm((f) => ({
                             ...f,
-                            whatsappNumber: e.target.value,
+                            telegram: e.target.checked,
                           }))
                         }
-                        placeholder="+1234567890"
                       />
+
+                      {messagingForm.telegram && (
+                        <div className="messaging-service-panel">
+                          {messagingStatus?.telegram?.linked ? (
+                            <CAlert color="success" className="py-2 mb-3" style={{ fontSize: "0.84rem" }}>
+                              Connected as{" "}
+                              <strong>
+                                {messagingStatus.telegram.username
+                                  ? `@${messagingStatus.telegram.username}`
+                                  : `chat ${messagingStatus.telegram.chatId}`}
+                              </strong>
+                              <div className="mt-1 text-muted">
+                                Mode: {messagingStatus.telegram.connectionMode}
+                              </div>
+                            </CAlert>
+                          ) : (
+                            <CAlert color="info" className="py-2 mb-3" style={{ fontSize: "0.84rem" }}>
+                              1. Click <strong>Generate link code</strong>
+                              <br />
+                              2. Open {messagingStatus?.telegram?.botUsername || "your Telegram bot"}
+                              <br />
+                              3. Send the <code>/start CODE</code> command
+                            </CAlert>
+                          )}
+
+                          <div className="d-flex flex-wrap gap-2 mb-3">
+                            <CButton
+                              size="sm"
+                              color="primary"
+                              onClick={handleGenerateTelegramCode}
+                              disabled={messagingActionLoading}
+                            >
+                              {messagingActionLoading ? <CSpinner size="sm" /> : "Generate link code"}
+                            </CButton>
+                            {(telegramLinkCode || messagingStatus?.telegram?.startCommand) && (
+                              <CButton
+                                size="sm"
+                                color="light"
+                                onClick={copyTelegramStartCommand}
+                              >
+                                Copy /start command
+                              </CButton>
+                            )}
+                            {messagingStatus?.telegram?.linked && (
+                              <>
+                                <CButton
+                                  size="sm"
+                                  color="light"
+                                  onClick={handleTestTelegram}
+                                  disabled={messagingActionLoading}
+                                >
+                                  Send test
+                                </CButton>
+                                <CButton
+                                  size="sm"
+                                  color="danger"
+                                  variant="outline"
+                                  onClick={handleUnlinkTelegram}
+                                  disabled={messagingActionLoading}
+                                >
+                                  Unlink
+                                </CButton>
+                              </>
+                            )}
+                          </div>
+
+                          {(telegramLinkCode || messagingStatus?.telegram?.startCommand) && (
+                            <div className="messaging-command-box mb-3">
+                              <code>
+                                {messagingStatus?.telegram?.startCommand ||
+                                  `/start ${telegramLinkCode}`}
+                              </code>
+                            </div>
+                          )}
+
+                          <CFormLabel className="fw-semibold">Telegram username (optional)</CFormLabel>
+                          <CFormInput
+                            value={messagingForm.telegramUsername}
+                            onChange={(e) =>
+                              setMessagingForm((f) => ({
+                                ...f,
+                                telegramUsername: e.target.value,
+                              }))
+                            }
+                            placeholder="@username"
+                          />
+                        </div>
+                      )}
                     </div>
-                  )}
+
+                    <div className="messaging-service-card">
+                      <div className="messaging-service-card-head">
+                        <span className="messaging-service-icon">
+                          <CIcon icon={cilSpeech} />
+                        </span>
+                        <div>
+                          <strong>WhatsApp</strong>
+                          <div className="text-muted" style={{ fontSize: "0.8rem" }}>
+                            Twilio WhatsApp channel
+                            {messagingStatus?.whatsapp?.twilioConfigured ? (
+                              <CBadge color="success" className="ms-2">Server ready</CBadge>
+                            ) : (
+                              <CBadge color="secondary" className="ms-2">Twilio not configured</CBadge>
+                            )}
+                          </div>
+                        </div>
+                        <CBadge color={messagingForm.whatsapp && messagingForm.whatsappNumber ? "success" : "secondary"}>
+                          {messagingForm.whatsapp && messagingForm.whatsappNumber ? "Configured" : "Setup needed"}
+                        </CBadge>
+                      </div>
+
+                      <CFormCheck
+                        id="whatsapp"
+                        className="mb-3"
+                        label="Enable WhatsApp approval notifications"
+                        checked={messagingForm.whatsapp}
+                        onChange={(e) =>
+                          setMessagingForm((f) => ({
+                            ...f,
+                            whatsapp: e.target.checked,
+                          }))
+                        }
+                      />
+
+                      {messagingForm.whatsapp && (
+                        <div className="messaging-service-panel">
+                          <CFormLabel className="fw-semibold">WhatsApp number</CFormLabel>
+                          <div className="d-flex flex-wrap gap-2">
+                            <CFormInput
+                              className="flex-grow-1"
+                              value={messagingForm.whatsappNumber}
+                              onChange={(e) =>
+                                setMessagingForm((f) => ({
+                                  ...f,
+                                  whatsappNumber: e.target.value,
+                                }))
+                              }
+                              placeholder="+1234567890"
+                            />
+                            <CButton
+                              size="sm"
+                              color="light"
+                              onClick={handleTestWhatsApp}
+                              disabled={
+                                messagingActionLoading ||
+                                !messagingForm.whatsappNumber ||
+                                !messagingStatus?.whatsapp?.twilioConfigured
+                              }
+                            >
+                              Send test
+                            </CButton>
+                          </div>
+                          {!messagingStatus?.whatsapp?.twilioConfigured && (
+                            <div className="form-text text-warning">
+                              Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_WHATSAPP_FROM on the server.
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   <div className="mb-3">
                     <CFormLabel className="fw-semibold">
-                      Preferred Approval Channel
+                      Preferred approval channel
                     </CFormLabel>
                     <CFormSelect
                       value={messagingForm.preferredApprovalChannel}
@@ -1094,6 +1659,8 @@ const SettingsPage = () => {
                   </div>
 
                   <hr className="my-4" />
+
+                  <h6 className="fw-semibold mb-3">Approval rules</h6>
 
                   <div className="mb-3">
                     <CFormCheck
@@ -1122,7 +1689,39 @@ const SettingsPage = () => {
                     />
                   </div>
 
-                  <div className="d-flex gap-2 flex-wrap">
+                  {messagingStatus?.approvals?.recent?.length > 0 && (
+                    <>
+                      <hr className="my-4" />
+                      <h6 className="fw-semibold mb-2">
+                        Recent approvals
+                        {messagingStatus.approvals.pendingCount > 0 && (
+                          <CBadge color="warning" className="ms-2">
+                            {messagingStatus.approvals.pendingCount} pending
+                          </CBadge>
+                        )}
+                      </h6>
+                      <ul className="messaging-approval-list mb-0">
+                        {messagingStatus.approvals.recent.map((item) => (
+                          <li key={item._id} className="messaging-approval-item">
+                            <span>{item.title}</span>
+                            <CBadge
+                              color={
+                                item.status === "approved"
+                                  ? "success"
+                                  : item.status === "rejected"
+                                    ? "danger"
+                                    : "warning"
+                              }
+                            >
+                              {item.status}
+                            </CBadge>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+
+                  <div className="d-flex gap-2 flex-wrap mt-4">
                     <CButton
                       color="primary"
                       onClick={handleSaveMessaging}
@@ -1138,6 +1737,13 @@ const SettingsPage = () => {
                       ) : (
                         "Save Messaging Settings"
                       )}
+                    </CButton>
+                    <CButton
+                      color="light"
+                      onClick={loadMessagingStatus}
+                      disabled={messagingActionLoading || detailsLoading}
+                    >
+                      {messagingActionLoading ? <CSpinner size="sm" /> : "Refresh status"}
                     </CButton>
                     <CButton
                       color="secondary"
@@ -1162,9 +1768,15 @@ const SettingsPage = () => {
 
           {activeTab === "ai" && (
             <CCol lg={8}>
-              <CCard>
-                <CCardHeader>
-                  <strong>🤖 AI Reply Preferences</strong>
+              <CCard className="settings-panel-card">
+                <CCardHeader className="settings-panel-header">
+                  <span className="settings-panel-icon">
+                    <CIcon icon={cilBolt} />
+                  </span>
+                  <div>
+                    <strong>AI Reply Preferences</strong>
+                    <small>Tone, auto-send behavior, and reply template</small>
+                  </div>
                 </CCardHeader>
                 <CCardBody>
                   {defaultMailboxEmail ? (

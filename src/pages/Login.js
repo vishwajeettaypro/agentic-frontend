@@ -48,7 +48,7 @@ const Login = () => {
       const response = await signIn(form.email.trim(), form.password);
       setUser(response.data);
       toast.success(response.message || 'Signed in successfully');
-      const redirectTo = location.state?.from?.pathname || '/dashboard';
+      const redirectTo = location.state?.from?.pathname || '/agents';
       navigate(redirectTo, { replace: true });
     } catch (err) {
       setError(err.message || 'Unable to sign in. Please try again.');
@@ -66,7 +66,7 @@ const Login = () => {
   }
 
   if (user) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to="/agents" replace />;
   }
 
   return (

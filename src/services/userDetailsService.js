@@ -17,6 +17,9 @@ export const completeMailboxSetup = (userId) =>
 export const saveProfile = (payload) =>
   api.post('/user-details/onboarding/profile', payload).then((r) => r.data);
 
+export const enrichProfileFromCompany = (payload) =>
+  api.post('/user-details/onboarding/profile/enrich', payload).then((r) => r.data);
+
 export const updateMessaging = (payload) =>
   api.patch('/user-details/onboarding/messaging', payload).then((r) => r.data);
 

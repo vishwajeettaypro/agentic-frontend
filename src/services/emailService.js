@@ -4,6 +4,32 @@ import api from '../config/api';
 export const getEmails = (userEmail) =>
   api.post('/email/emails', { userEmail }).then((r) => r.data);
 
+export const downloadEmailAttachment = (
+  userEmail,
+  messageId,
+  attachmentId,
+  fileName,
+  mimeType,
+) =>
+  api
+    .post(
+      '/email/attachments/download',
+      { userEmail, messageId, attachmentId, fileName, mimeType },
+      { responseType: 'blob' },
+    )
+    .then((response) => {
+      const blob = response.data;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName || 'attachment';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      return true;
+    });
+
 // POST /api/v1/email/generate-reply — body: { userEmail, messageId }
 export const generateReply = (userEmail, messageId) =>
   api.post('/email/generate-reply', { userEmail, messageId }).then((r) => r.data);

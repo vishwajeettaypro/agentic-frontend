@@ -6,12 +6,22 @@ import {
   CCard,
   CCardBody,
   CCardHeader,
-  CButton,
   CSpinner,
 } from "@coreui/react";
+import CIcon from "@coreui/icons-react";
+import {
+  cilEnvelopeClosed,
+  cilSend,
+  cilPencil,
+  cilBolt,
+  cilInbox,
+  cilCalendar,
+  cilHistory,
+} from "@coreui/icons";
 import { getEmailStatistics } from "../services/emailService";
 import { useApp } from "../context/AppContext";
-import MailboxSelector from "../components/MailboxSelector";
+import PageHeader from "../components/PageHeader";
+import { EMAIL_AGENT_PATHS } from "../config/agents";
 import { Toaster } from "react-hot-toast";
 
 export default function Dashboard() {
@@ -25,7 +35,7 @@ export default function Dashboard() {
     setLoading(true);
     getEmailStatistics(userEmail)
       .then((data) => setStats(data.statistics))
-      .catch(() => {}) // stats are optional
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, [userEmail]);
 
@@ -33,225 +43,156 @@ export default function Dashboard() {
     {
       label: "Total Processed",
       value: stats?.totalEmails ?? "—",
-      cls: "stat-primary",
-      icon: "📧",
+      variant: "primary",
+      icon: cilEnvelopeClosed,
     },
     {
       label: "Emails Sent",
       value: stats?.sentEmails ?? "—",
-      cls: "stat-success",
-      icon: "✅",
+      variant: "success",
+      icon: cilSend,
     },
     {
       label: "Drafts",
       value: stats?.draftEmails ?? "—",
-      cls: "stat-warning",
-      icon: "📝",
+      variant: "warning",
+      icon: cilPencil,
     },
     {
       label: "AI Generated",
       value: stats?.generatedEmails ?? "—",
-      cls: "stat-info",
-      icon: "🤖",
+      variant: "info",
+      icon: cilBolt,
+    },
+  ];
+
+  const quickActions = [
+    {
+      title: "Check Inbox",
+      desc: "Fetch and AI-reply to emails",
+      icon: cilInbox,
+      path: EMAIL_AGENT_PATHS.inbox,
+    },
+    {
+      title: "Calendar",
+      desc: "View and create events",
+      icon: cilCalendar,
+      path: EMAIL_AGENT_PATHS.calendar,
+    },
+    {
+      title: "Email History",
+      desc: "View AI-processed emails",
+      icon: cilHistory,
+      path: EMAIL_AGENT_PATHS.history,
+    },
+  ];
+
+  const steps = [
+    {
+      step: "1",
+      title: "Fetch Emails",
+      desc: "Pull inbox messages from Gmail or Outlook",
+    },
+    {
+      step: "2",
+      title: "AI Generates Reply",
+      desc: "AI reads the email and drafts a professional response",
+    },
+    {
+      step: "3",
+      title: "Review & Edit",
+      desc: "Review the draft and adjust before sending",
+    },
+    {
+      step: "4",
+      title: "Send",
+      desc: "Approve and send with one click",
     },
   ];
 
   return (
     <>
       <Toaster position="top-right" />
-      <div className="mb-4">
-        <h4 className="fw-700 mb-1" style={{ color: "#1a1f36" }}>
-          Dashboard
-        </h4>
-        <p className="text-muted mb-2" style={{ fontSize: "0.88rem" }}>
-          {userEmail
-            ? `Active mailbox: ${userEmail}`
+      <PageHeader
+        title="Email Agent Dashboard"
+        subtitle={
+          userEmail
+            ? "Overview of AI email activity for the selected mailbox"
             : connectedMailboxes?.length
               ? "Complete mailbox setup in Settings to activate features"
-              : "Connect mailboxes in Settings to get started"}
-          {authEmail && userEmail !== authEmail && (
-            <> · Signed in as {authEmail}</>
-          )}
+              : "Connect mailboxes in Settings to get started"
+        }
+      />
+
+      {authEmail && userEmail && userEmail !== authEmail && (
+        <p className="saas-text-muted mb-4">
+          Signed in as {authEmail}
         </p>
-        <MailboxSelector showLabel={false} />
-      </div>
+      )}
 
       {!userEmail && (
-        <div
-          className="alert alert-warning d-flex align-items-center gap-3 mb-4"
-          style={{ borderRadius: 10 }}
-        >
-          <span style={{ fontSize: "1.3rem" }}>⚠️</span>
-          <div>
+        <div className="saas-alert">
+          <div className="flex-grow-1">
             <strong>Mailbox not ready.</strong>{" "}
             {onboarding?.canCompleteMailboxSetup
               ? "Complete mailbox setup in Settings."
               : "Connect at least one Outlook or Gmail mailbox in Settings."}
           </div>
-          <CButton
-            color="warning"
-            size="sm"
-            className="ms-auto"
+          <button
+            type="button"
+            className="saas-btn-primary ms-auto flex-shrink-0"
             onClick={() => navigate("/settings")}
           >
             Open Settings
-          </CButton>
+          </button>
         </div>
       )}
 
-      {/* Stat Cards */}
       <CRow className="g-3 mb-4">
         {statCards.map((s) => (
           <CCol key={s.label} xs={6} lg={3}>
-            <div className={`stat-card ${s.cls}`}>
-              <div style={{ fontSize: "1.6rem", marginBottom: 4 }}>
-                {s.icon}
+            <div className={`saas-stat-card saas-stat-card--${s.variant}`}>
+              <div className="saas-stat-icon">
+                <CIcon icon={s.icon} />
               </div>
-              <div className="stat-value">
-                {loading ? <CSpinner size="sm" color="light" /> : s.value}
+              <div className="saas-stat-value">
+                {loading ? <CSpinner size="sm" /> : s.value}
               </div>
-              <div className="stat-label">{s.label}</div>
+              <div className="saas-stat-label">{s.label}</div>
             </div>
           </CCol>
         ))}
       </CRow>
 
-      {/* Quick Actions */}
       <CRow className="g-3 mb-4">
-        <CCol md={4}>
-          <CCard
-            style={{ cursor: "pointer", transition: "box-shadow 0.18s" }}
-            onClick={() => navigate("/email")}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.boxShadow =
-                "0 4px 20px rgba(50,31,219,0.12)")
-            }
-            onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "")}
-          >
-            <CCardBody className="text-center py-4">
-              <div style={{ fontSize: "2.2rem", marginBottom: 12 }}>📥</div>
-              <div className="fw-600" style={{ color: "#1a1f36" }}>
-                Check Inbox
-              </div>
-              <div className="text-muted mt-1" style={{ fontSize: "0.82rem" }}>
-                Fetch & AI-reply to emails
-              </div>
-            </CCardBody>
-          </CCard>
-        </CCol>
-        <CCol md={4}>
-          <CCard
-            style={{ cursor: "pointer", transition: "box-shadow 0.18s" }}
-            onClick={() => navigate("/calendar")}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.boxShadow =
-                "0 4px 20px rgba(50,31,219,0.12)")
-            }
-            onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "")}
-          >
-            <CCardBody className="text-center py-4">
-              <div style={{ fontSize: "2.2rem", marginBottom: 12 }}>📅</div>
-              <div className="fw-600" style={{ color: "#1a1f36" }}>
-                Calendar
-              </div>
-              <div className="text-muted mt-1" style={{ fontSize: "0.82rem" }}>
-                View & create events
-              </div>
-            </CCardBody>
-          </CCard>
-        </CCol>
-        <CCol md={4}>
-          <CCard
-            style={{ cursor: "pointer", transition: "box-shadow 0.18s" }}
-            onClick={() => navigate("/history")}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.boxShadow =
-                "0 4px 20px rgba(50,31,219,0.12)")
-            }
-            onMouseLeave={(e) => (e.currentTarget.style.boxShadow = "")}
-          >
-            <CCardBody className="text-center py-4">
-              <div style={{ fontSize: "2.2rem", marginBottom: 12 }}>📋</div>
-              <div className="fw-600" style={{ color: "#1a1f36" }}>
-                Email History
-              </div>
-              <div className="text-muted mt-1" style={{ fontSize: "0.82rem" }}>
-                View AI-processed emails
-              </div>
-            </CCardBody>
-          </CCard>
-        </CCol>
+        {quickActions.map((action) => (
+          <CCol key={action.path} md={4}>
+            <CCard
+              className="saas-card saas-card--interactive h-100"
+              onClick={() => navigate(action.path)}
+            >
+              <CCardBody className="saas-action-card">
+                <div className="saas-action-icon">
+                  <CIcon icon={action.icon} />
+                </div>
+                <div className="saas-action-title">{action.title}</div>
+                <div className="saas-action-desc">{action.desc}</div>
+              </CCardBody>
+            </CCard>
+          </CCol>
+        ))}
       </CRow>
 
-      {/* How it works */}
-      <CCard>
+      <CCard className="saas-card">
         <CCardHeader>How it works</CCardHeader>
         <CCardBody>
-          <CRow className="g-3 text-center">
-            {[
-              {
-                step: "1",
-                icon: "📧",
-                title: "Fetch Emails",
-                desc: "Pull your latest inbox messages from Outlook via Microsoft Graph API",
-              },
-              {
-                step: "2",
-                icon: "🤖",
-                title: "AI Generates Reply",
-                desc: "Gemini AI reads the email and crafts a professional reply",
-              },
-              {
-                step: "3",
-                icon: "✏️",
-                title: "Review & Edit",
-                desc: "Check the generated reply, make any edits needed",
-              },
-              {
-                step: "4",
-                icon: "🚀",
-                title: "Send",
-                desc: "One click to create a draft and send it back to the sender",
-              },
-            ].map((item) => (
+          <CRow className="g-3">
+            {steps.map((item) => (
               <CCol key={item.step} sm={6} lg={3}>
-                <div
-                  style={{
-                    background: "#f8f9ff",
-                    borderRadius: 10,
-                    padding: "16px 12px",
-                    border: "1px solid #e2e6ff",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: 32,
-                      height: 32,
-                      borderRadius: "50%",
-                      background: "linear-gradient(135deg, #321fdb, #5b5ea6)",
-                      color: "#fff",
-                      fontWeight: 700,
-                      fontSize: "0.82rem",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      margin: "0 auto 10px",
-                    }}
-                  >
-                    {item.step}
-                  </div>
-                  <div style={{ fontSize: "1.5rem", marginBottom: 6 }}>
-                    {item.icon}
-                  </div>
-                  <div
-                    className="fw-600 mb-1"
-                    style={{ fontSize: "0.88rem", color: "#1a1f36" }}
-                  >
-                    {item.title}
-                  </div>
-                  <div className="text-muted" style={{ fontSize: "0.78rem" }}>
-                    {item.desc}
-                  </div>
+                <div className="saas-step-card">
+                  <span className="saas-step-number">{item.step}</span>
+                  <div className="saas-step-title">{item.title}</div>
+                  <div className="saas-step-desc">{item.desc}</div>
                 </div>
               </CCol>
             ))}
